@@ -322,3 +322,83 @@ class TestParameterDiff:
         diff = store1.diff(store2, rtol=0.01)
         assert "small" not in diff.changed
         assert "large" not in diff.changed
+
+    def test_diff_numpy_arrays(self):
+        """Test exact and approximate comparison of NumPy arrays."""
+        import numpy as np
+
+        store1 = ParameterStore({"values": np.array([1.0, 2.0])})
+        store2 = ParameterStore({"values": np.array([1.0, 2.000001])})
+
+        # Without tolerance, arrays should be reported as different.
+        diff_exact = store1.diff(store2)
+        assert "values" in diff_exact.changed
+
+        # A small difference should be ignored with sufficient tolerance.
+        diff_tolerant = store1.diff(store2, rtol=1e-5)
+        assert diff_tolerant.changed == {}
+
+        # A stricter tolerance should detect the difference.
+        diff_strict = store1.diff(store2, rtol=1e-8)
+        assert "values" in diff_strict.changed
+
+    def test_diff_callable_identity(self):
+        """Functions are compared by identity, not their output."""
+
+        def first(x):
+            return x * 2
+
+        def second(x):
+            return x * 2
+
+        store1 = ParameterStore({
+            "unchanged": first,
+            "changed": first,
+        })
+        store2 = ParameterStore({
+            "unchanged": first,
+            "changed": second,
+        })
+
+        diff = store1.diff(store2)
+
+        assert diff.added == {}
+        assert diff.removed == {}
+        assert diff.changed == {"changed": (first, second)}
+
+    def test_diff_handles_equality_error(self):
+        """Comparison errors should mark values as changed, not crash."""
+
+        class Uncomparable:
+            def __eq__(self, other):
+                raise ValueError("Cannot compare these objects")
+
+        first = Uncomparable()
+        second = Uncomparable()
+
+        store1 = ParameterStore({"problematic": first})
+        store2 = ParameterStore({"problematic": second})
+
+        diff = store1.diff(store2)
+
+        assert set(diff.changed) == {"problematic"}
+        assert diff.changed["problematic"][0] is first
+        assert diff.changed["problematic"][1] is second
+
+    def test_diff_incompatible_array_shapes(self):
+        """Arrays with incompatible shapes should be reported as changed."""
+        import numpy as np
+
+        first = np.array([1.0, 2.0])
+        second = np.array([1.0, 2.0, 3.0])
+
+        store1 = ParameterStore({"values": first})
+        store2 = ParameterStore({"values": second})
+
+        # np.allclose cannot broadcast these shapes together.
+        # ParameterStore should handle the error without crashing.
+        diff = store1.diff(store2, rtol=1e-6)
+
+        assert set(diff.changed) == {"values"}
+        assert diff.changed["values"][0] is first
+        assert diff.changed["values"][1] is second

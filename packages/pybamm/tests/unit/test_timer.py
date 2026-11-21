@@ -12,9 +12,6 @@ class TestTimer:
     Tests the basic methods of the Timer class.
     """
 
-    def __init__(self, name):
-        super().__init__(name)
-
     def test_timing(self):
         t = pybamm.Timer()
         a = t.time().value

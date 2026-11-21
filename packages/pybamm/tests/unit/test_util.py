@@ -295,3 +295,94 @@ class TestSearch:
                 fake_out.getvalue()
                 == "Results for 'electro': ['Electrolyte concentration', 'Electrode potential']\n"
             )
+
+
+class TestUtilityCoverage:
+    """Additional regression tests for utility edge cases."""
+
+    def test_timer_with_mocked_clock(self, mocker):
+        clock = mocker.patch(
+            "pybamm.util.timeit.default_timer",
+            side_effect=[100.0, 100.25, 200.0, 200.5],
+        )
+        timer = pybamm.Timer()
+        assert timer.time().value == pytest.approx(0.25)
+
+        timer.reset()
+        assert timer.time().value == pytest.approx(0.5)
+        assert clock.call_count == 4
+
+
+    @pytest.mark.parametrize(
+        ("system", "machine", "expected"),
+        [
+            ("darwin", "x86_64", True),
+            ("darwin", "arm64", False),
+            ("win32", "x86_64", False),
+        ],
+    )
+    def test_is_macos_intel(
+        self, monkeypatch, mocker, system, machine, expected
+    ):
+        """Check platform detection across different architectures."""
+        import platform
+
+        machine_mock = mocker.patch.object(
+            platform, "machine", return_value=machine
+        )
+
+        with monkeypatch.context() as patches:
+            patches.setattr(sys, "platform", system)
+            assert pybamm.util.is_macos_intel() is expected
+
+        if system == "win32":
+            # Non-macOS platforms should skip the architecture check.
+            machine_mock.assert_not_called()
+        else:
+            machine_mock.assert_called_once_with()
+
+    def test_raise_jax_not_found_on_intel_mac(self, mocker):
+        check = mocker.patch(
+            "pybamm.util.is_macos_intel", return_value=True
+        )
+
+        with pytest.raises(
+            ModuleNotFoundError,
+            match="JAX is not available on macOS with Intel processors",
+        ):
+            pybamm.util.raise_jax_not_found()
+
+        check.assert_called_once_with()
+
+    def test_raise_jax_not_found_on_other_platforms(self, mocker):
+        check = mocker.patch(
+            "pybamm.util.is_macos_intel", return_value=False
+        )
+
+        with pytest.raises(
+            ModuleNotFoundError,
+            match="Jax or jaxlib is not installed",
+        ):
+            pybamm.util.raise_jax_not_found()
+
+        check.assert_called_once_with()
+
+    def test_load_pickle_roundtrip(self, tmp_path):
+        import pickle
+
+        original = {"values": [1, 2, 3], "name": "test"}
+        path = tmp_path / "trusted_data.pkl"
+        path.write_bytes(pickle.dumps(original))
+
+        assert pybamm.util.load(path) == original
+
+    def test_fuzzy_dict_copy_preserves_shallow_values(self):
+        original = pybamm.FuzzyDict({"sample data": [1, 2]})
+        copied = original.copy()
+
+        assert isinstance(copied, pybamm.FuzzyDict)
+        assert copied is not original
+        assert copied["sample data"] is original["sample data"]
+
+        copied["new key"] = 42
+        assert "new key" not in original
