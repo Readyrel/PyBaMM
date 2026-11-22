@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from warnings import warn
 
 import pybamm
+import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -475,13 +476,16 @@ class ParameterStore:
         self_keys = set(self._data.keys())
         other_keys = set(other._data.keys())
 
-        added = {k: other._data[k] for k in other_keys - self_keys}
-        removed = {k: self._data[k] for k in self_keys - other_keys}
+        # All accessed keys are known to exist, so fuzzy lookup is unnecessary.
+        get_exact = dict.__getitem__
+
+        added = {k: get_exact(other._data, k) for k in other_keys - self_keys}
+        removed = {k: get_exact(self._data, k) for k in self_keys - other_keys}
 
         changed = {}
         for key in self_keys & other_keys:
-            self_val = self._data[key]
-            other_val = other._data[key]
+            self_val = get_exact(self._data, key)
+            other_val = get_exact(other._data, key)
             if not _values_equal(self_val, other_val, rtol=rtol):
                 changed[key] = (self_val, other_val)
 
@@ -511,7 +515,6 @@ def _values_equal(a: Any, b: Any, *, rtol: float = 0.0) -> bool:
     rtol : float
         Relative tolerance for numerical comparisons.
     """
-    import numpy as np
 
     # Handle numpy arrays
     if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
